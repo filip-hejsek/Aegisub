@@ -94,8 +94,13 @@ class ColorPickerSpectrum final : public wxControl {
 	int x;
 	int y;
 
-	wxBitmap *background;
+	wxImage *background;
+	wxBitmap backgroundBitmap;
 	PickerDirection direction;
+
+	static bool IsDarkColor(unsigned char r, unsigned char g, unsigned char b) {
+		return 0.3 * r + 0.6 * g + 0.1 * b < 128;
+	}
 
 	void OnPaint(wxPaintEvent &) {
 		if (!background) return;
@@ -104,27 +109,29 @@ class ColorPickerSpectrum final : public wxControl {
 		int width = background->GetWidth();
 		wxPaintDC dc(this);
 
-		wxMemoryDC memdc;
-		memdc.SelectObject(*background);
-		dc.Blit(1, 1, width, height, &memdc, 0, 0);
+		dc.DrawBitmap(backgroundBitmap, 1, 1);
 
 		wxPoint arrow[3];
 		wxRect arrow_box;
 
-		wxPen invpen(*wxWHITE, 3);
-		invpen.SetCap(wxCAP_BUTT);
-		dc.SetLogicalFunction(wxXOR);
-		dc.SetPen(invpen);
+		dc.SetPen(*wxTRANSPARENT_PEN);
+		int x2 = mid(0, x, width-1), y2 = mid(0, y, height-1);
+		if (IsDarkColor(background->GetRed(x2, y2), background->GetGreen(x2, y2), background->GetBlue(x2, y2)))
+			dc.SetBrush(*wxWHITE_BRUSH);
+		else
+			dc.SetBrush(*wxBLACK_BRUSH);
 
 		switch (direction) {
 			case PickerDirection::HorzVert:
 				// Make a little cross
-				dc.DrawLine(x-4, y+1, x+7, y+1);
-				dc.DrawLine(x+1, y-4, x+1, y+7);
+				dc.DrawRectangle(x-5, y, 5, 3);
+				dc.DrawRectangle(x+3, y, 5, 3);
+				dc.DrawRectangle(x, y-5, 3, 5);
+				dc.DrawRectangle(x, y+3, 3, 5);
 				break;
 			case PickerDirection::Horz:
 				// Make a vertical line stretching all the way across
-				dc.DrawLine(x+1, 1, x+1, height+1);
+				dc.DrawRectangle(x, 1, 3, height);
 				// Points for arrow
 				arrow[0] = wxPoint(x+1, height+2);
 				arrow[1] = wxPoint(x+1-spectrum_horz_vert_arrow_size, height+2+spectrum_horz_vert_arrow_size);
@@ -137,7 +144,7 @@ class ColorPickerSpectrum final : public wxControl {
 				break;
 			case PickerDirection::Vert:
 				// Make a horizontal line stretching all the way across
-				dc.DrawLine(1, y+1, width+1, y+1);
+				dc.DrawRectangle(1, y, width, 3);
 				// Points for arrow
 				arrow[0] = wxPoint(width+2, y+1);
 				arrow[1] = wxPoint(width+2+spectrum_horz_vert_arrow_size, y+1-spectrum_horz_vert_arrow_size);
@@ -151,15 +158,17 @@ class ColorPickerSpectrum final : public wxControl {
 		}
 
 		if (direction == PickerDirection::Horz || direction == PickerDirection::Vert) {
-			wxBrush bgBrush;
-			bgBrush.SetColour(GetBackgroundColour());
-			dc.SetLogicalFunction(wxCOPY);
+			wxColour bgColor = GetBackgroundColour();
+			wxBrush bgBrush(bgColor);
 			dc.SetPen(*wxTRANSPARENT_PEN);
 			dc.SetBrush(bgBrush);
 			dc.DrawRectangle(arrow_box);
 
 			// Arrow pointing at current point
-			dc.SetBrush(*wxBLACK_BRUSH);
+			if (IsDarkColor(bgColor.Red(), bgColor.Green(), bgColor.Blue()))
+				dc.SetBrush(*wxWHITE_BRUSH);
+			else
+				dc.SetBrush(*wxBLACK_BRUSH);
 			dc.DrawPolygon(3, arrow);
 		}
 
@@ -167,7 +176,6 @@ class ColorPickerSpectrum final : public wxControl {
 		wxPen blkpen(wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOWTEXT), 1);
 		blkpen.SetCap(wxCAP_BUTT);
 
-		dc.SetLogicalFunction(wxCOPY);
 		dc.SetPen(blkpen);
 		dc.SetBrush(*wxTRANSPARENT_BRUSH);
 		dc.DrawRectangle(0, 0, background->GetWidth()+2, background->GetHeight()+2);
@@ -238,9 +246,10 @@ public:
 	/// @brief Set the background image for this spectrum
 	/// @param new_background New background image
 	/// @param force Repaint even if it appears to be the same image
-	void SetBackground(wxBitmap *new_background, bool force = false) {
+	void SetBackground(wxImage *new_background, bool force = false) {
 		if (background == new_background && !force) return;
 		background = new_background;
+		backgroundBitmap = wxBitmap(*background);
 		Refresh(false);
 	}
 };
@@ -443,17 +452,17 @@ class DialogColorPicker final : public wxDialog {
 	wxChoice *colorspace_choice; ///< The dropdown list to select colorspaces
 
 	wxSpinCtrl *rgb_input[3];
-	wxBitmap rgb_spectrum[3]; ///< x/y spectrum bitmap where color "i" is excluded from
-	wxBitmap rgb_slider[3];   ///< z spectrum for color "i"
+	wxImage rgb_spectrum[3]; ///< x/y spectrum bitmap where color "i" is excluded from
+	wxImage rgb_slider[3];   ///< z spectrum for color "i"
 
 	wxSpinCtrl *hsl_input[3];
-	wxBitmap hsl_spectrum; ///< h/s spectrum
-	wxBitmap hsl_slider;   ///< l spectrum
+	wxImage hsl_spectrum; ///< h/s spectrum
+	wxImage hsl_slider;   ///< l spectrum
 
 	wxSpinCtrl *hsv_input[3];
-	wxBitmap hsv_spectrum; ///< s/v spectrum
-	wxBitmap hsv_slider;   ///< h spectrum
-	wxBitmap alpha_slider_img;
+	wxImage hsv_spectrum; ///< s/v spectrum
+	wxImage hsv_slider;   ///< h spectrum
+	wxImage alpha_slider_img;
 
 	wxTextCtrl *ass_input;
 	wxTextCtrl *html_input;
@@ -495,11 +504,11 @@ class DialogColorPicker final : public wxDialog {
 	/// Redraw the spectrum display
 	void UpdateSpectrumDisplay();
 
-	wxBitmap *MakeGBSpectrum();
-	wxBitmap *MakeRBSpectrum();
-	wxBitmap *MakeRGSpectrum();
-	wxBitmap *MakeHSSpectrum();
-	wxBitmap *MakeSVSpectrum();
+	wxImage *MakeGBSpectrum();
+	wxImage *MakeRBSpectrum();
+	wxImage *MakeRGSpectrum();
+	wxImage *MakeHSSpectrum();
+	wxImage *MakeSVSpectrum();
 
 	/// Constructor helper function for making the color input box sizers
 	template<int N, class Control>
@@ -529,15 +538,14 @@ static const int slider_width = 10; ///< width in pixels of the color slider con
 static const int alpha_box_size = 5;
 
 template<typename Func>
-static wxBitmap make_slider_img(Func func) {
+static wxImage make_slider_img(Func func) {
 	unsigned char *slid = (unsigned char *)calloc(slider_width * 256 * 3, 1);
 	func(slid);
-	wxImage img(slider_width, 256, slid);
-	return wxBitmap(img);
+	return wxImage(slider_width, 256, slid);
 }
 
 template<typename Func>
-static wxBitmap make_slider(Func func) {
+static wxImage make_slider(Func func) {
 	return make_slider_img([&](unsigned char *slid) {
 		for (int y = 0; y < 256; ++y) {
 			unsigned char rgb[3];
@@ -939,14 +947,13 @@ void DialogColorPicker::UpdateSpectrumDisplay() {
 }
 
 template<typename Func>
-static wxBitmap *make_spectrum(wxBitmap *bitmap, Func func) {
-	wxImage spectrum_image(256, 256);
-	func(spectrum_image.GetData());
-	*bitmap = wxBitmap(spectrum_image);
-	return bitmap;
+static wxImage *make_spectrum(wxImage *image, Func func) {
+	*image = wxImage(256, 256);
+	func(image->GetData());
+	return image;
 }
 
-wxBitmap *DialogColorPicker::MakeGBSpectrum() {
+wxImage *DialogColorPicker::MakeGBSpectrum() {
 	return make_spectrum(&rgb_spectrum[0], [this](unsigned char *spec) {
 		for (int g = 0; g < 256; g++) {
 			for (int b = 0; b < 256; b++) {
@@ -958,7 +965,7 @@ wxBitmap *DialogColorPicker::MakeGBSpectrum() {
 	});
 }
 
-wxBitmap *DialogColorPicker::MakeRBSpectrum() {
+wxImage *DialogColorPicker::MakeRBSpectrum() {
 	return make_spectrum(&rgb_spectrum[1], [this](unsigned char *spec) {
 		for (int r = 0; r < 256; r++) {
 			for (int b = 0; b < 256; b++) {
@@ -970,7 +977,7 @@ wxBitmap *DialogColorPicker::MakeRBSpectrum() {
 	});
 }
 
-wxBitmap *DialogColorPicker::MakeRGSpectrum() {
+wxImage *DialogColorPicker::MakeRGSpectrum() {
 	return make_spectrum(&rgb_spectrum[2], [this](unsigned char *spec) {
 		for (int r = 0; r < 256; r++) {
 			for (int g = 0; g < 256; g++) {
@@ -982,7 +989,7 @@ wxBitmap *DialogColorPicker::MakeRGSpectrum() {
 	});
 }
 
-wxBitmap *DialogColorPicker::MakeHSSpectrum() {
+wxImage *DialogColorPicker::MakeHSSpectrum() {
 	int l = hsl_input[2]->GetValue();
 	return make_spectrum(&hsl_spectrum, [=](unsigned char *spec) {
 		for (int h = 0; h < 256; h++) {
@@ -998,7 +1005,7 @@ wxBitmap *DialogColorPicker::MakeHSSpectrum() {
 	});
 }
 
-wxBitmap *DialogColorPicker::MakeSVSpectrum() {
+wxImage *DialogColorPicker::MakeSVSpectrum() {
 	int h = hsv_input[0]->GetValue();
 	unsigned char maxr, maxg, maxb;
 	hsv_to_rgb(h, 255, 255, &maxr, &maxg, &maxb);
