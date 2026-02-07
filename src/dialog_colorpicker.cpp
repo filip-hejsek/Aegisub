@@ -35,6 +35,7 @@
 #include "persist_location.h"
 #include "utils.h"
 #include "value_event.h"
+#include "wx/gdicmn.h"
 #include "xdg_desktop_portal_utils.h"
 
 #include <libaegisub/log.h>
@@ -194,7 +195,7 @@ class ColorPickerSpectrum final : public wxControl {
 		}
 		else if (evt.LeftUp() && HasCapture()) {
 			ReleaseMouse();
-			SetCursor(wxNullCursor);
+			SetCursor(wxCURSOR_CROSS);
 		}
 
 		if (evt.LeftDown() || (HasCapture() && evt.LeftIsDown())) {
@@ -225,6 +226,7 @@ public:
 
 		SetClientSize(size);
 		SetMinSize(GetSize());
+		SetCursor(wxCURSOR_CROSS);
 
 		Bind(wxEVT_LEFT_DOWN, &ColorPickerSpectrum::OnMouse, this);
 		Bind(wxEVT_LEFT_UP, &ColorPickerSpectrum::OnMouse, this);
