@@ -475,7 +475,7 @@ class DialogColorPicker final : public wxDialog {
 	/// click the eyedropper or drag the eyedropper
 	wxPoint eyedropper_grab_point;
 
-	bool eyedropper_is_grabbed;
+	bool eyedropper_is_grabbed = false;
 
 	wxStaticBitmap *preview_box; ///< A box which simply shows the current color
 	ColorPickerRecent *recent_box; ///< A grid of recently used colors
