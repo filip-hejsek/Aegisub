@@ -219,7 +219,7 @@ bool AegisubApp::OnInit() {
 	cmd::init_builtin_commands();
 
 	// Init hotkeys
-	hotkey::init();
+	hotkey::init(); // FIXME this can throw exception, which causes silent crash
 
 	StartupLog("Load MRU");
 	config::mru = new agi::MRUManager(config::path->Decode("?user/mru.json"), GET_DEFAULT_CONFIG(default_mru), config::opt);
