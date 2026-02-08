@@ -22,11 +22,10 @@ fi
 # If no git repo try to read from the existing git_version.h, for building from tarballs
 if ! test -d "${srcdir}/.git" -o -f "${srcdir}/.git"; then
   if test -f "${version_h_path}"; then
-    while read line; do
-      set -- $line
-      export $2=$(echo $3 | sed 's/"//g')
+    while read define name value; do
+      export "$name=$(echo "$value" | sed 's/"//g')"
     done < "${version_h_path}"
-    if test x$BUILD_GIT_VERSION_NUMBER != x -a x$BUILD_GIT_VERSION_STRING != x; then
+    if test "x$BUILD_GIT_VERSION_NUMBER" != "x" -a "x$BUILD_GIT_VERSION_STRING" != "x"; then
       exit 0
     else
       echo "invalid git_version.h"
@@ -90,7 +89,7 @@ s/@PLIST_BUILD_DATE@/${build_date}/g
 
 # Write it only if it's changed to avoid spurious rebuilds
 # This bizarre comparison method is due to that newlines in shell variables are very exciting
-case "$(cat ${version_h_path} 2> /dev/null)"
+case "$(cat "${version_h_path}" 2> /dev/null)"
 in
   "${new_version_h}");;
   *)
