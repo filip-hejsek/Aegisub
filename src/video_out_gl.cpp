@@ -264,7 +264,7 @@ void VideoOutGL::UploadFrameData(VideoFrame const& frame) {
 	CHECK_ERROR(glPixelStorei(GL_UNPACK_ROW_LENGTH, 0));
 }
 
-void VideoOutGL::Render(int client_width, int client_height, int dx1, int dy1, int dx2, int dy2) {
+void VideoOutGL::Render(int client_width, int client_height, int x, int y, int width, int height) {
 	CHECK_ERROR(glMatrixMode(GL_PROJECTION));
 	CHECK_ERROR(glLoadIdentity());
 	CHECK_ERROR(glPushMatrix());
@@ -274,11 +274,15 @@ void VideoOutGL::Render(int client_width, int client_height, int dx1, int dy1, i
 	// Transform (-1, -1) ~ (1, 1) rect to (-1, 1) + 2 * ( (dx1 / client_width, dx2 / client_height) ~ ((dx1 + dx2) / client_width, (dy1 + dy2) / client_height)) )) rect
 	// x = -1 goes to -1 + 2 * dx1 / cw
 	// x = +1 goes to -1 + 2 * (dx1 + dx2) / cw
+	float scale_x = width / cw;
+	float scale_y = height / ch;
+	float translate_x = -1 + (2 * x + width) / cw;
+	float translate_y = -1 + (2 * y + height) / ch;
 	float matrix[16] = {
-		dx2 / cw,		 0, 0, 0,
-		0,        dy2 / ch, 0, 0,
+		scale_x, 0, 0, 0,
+		0, scale_y, 0, 0,
 		0, 0, 1, 0,
-		-1 + (2 * dx1 + dx2) / cw, -1 + (2 * dy1 + dy2) / ch, 0, 1,
+		translate_x, translate_y, 0, 1,
 	};
 	CHECK_ERROR(glMultMatrixf(matrix));
 
