@@ -297,11 +297,16 @@ void VideoDisplay::PositionVideo() {
 	auto provider = con->project->VideoProvider();
 	if (!provider || !IsShownOnScreen()) return;
 
+	if (freeSize) {
+		// Update viewportSize
+		viewportSize = GetClientSize() * scale_factor;
+	}
+
 	content_width = viewportSize.GetWidth();
 	content_height = viewportSize.GetHeight();
 
-	// Adjust aspect ratio if necessary
 	if (freeSize) {
+		// Adjust aspect ratio if necessary
 		int vidW = provider->GetWidth();
 		int vidH = provider->GetHeight();
 
@@ -317,6 +322,11 @@ void VideoDisplay::PositionVideo() {
 		else if (videoAr - displayAr > 0.01) {
 			content_height = content_width / videoAr;
 		}
+
+		// Update windowZoomValue
+		windowZoomValue = double(content_height) / vidH;
+		zoomBox->ChangeValue(fmt_wx("%g%%", windowZoomValue * 100.));
+		con->ass->Properties.video_zoom = windowZoomValue;
 	}
 
 	// Apply content zoom
@@ -382,16 +392,7 @@ void VideoDisplay::FitClientSizeToVideo() {
 }
 
 void VideoDisplay::OnSizeEvent(wxSizeEvent &) {
-	if (freeSize) {
-		viewportSize = GetClientSize() * scale_factor;
-		PositionVideo();
-		windowZoomValue = double(content_height) / con->project->VideoProvider()->GetHeight();
-		zoomBox->ChangeValue(fmt_wx("%g%%", windowZoomValue * 100.));
-		con->ass->Properties.video_zoom = windowZoomValue;
-	}
-	else {
-		PositionVideo();
-	}
+	PositionVideo();
 }
 
 void VideoDisplay::OnMouseEvent(wxMouseEvent& event) {
