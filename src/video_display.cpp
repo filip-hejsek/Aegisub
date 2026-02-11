@@ -59,6 +59,11 @@
 #include <wx/textctrl.h>
 #include <wx/toolbar.h>
 
+#ifdef __WXGTK__
+#include <gdk/gdk.h>
+#include <gtk/gtk.h>
+#endif
+
 namespace {
 
 /// Attribute list for gl canvases; set the canvases to doublebuffered rgba with an 8 bit stencil buffer
@@ -90,6 +95,30 @@ enum {
 	NOTHING,
 };
 
+MiniVideoDisplay::MiniVideoDisplay(wxWindow *parent)
+: wxGLCanvas(parent, buildGLAttributes())
+{
+	Bind(wxEVT_PAINT, std::bind(&MiniVideoDisplay::Render, this));
+}
+
+void MiniVideoDisplay::Render() {
+	// FIXME handle exceptions
+	if (!glContext || !videoOut)
+		return;
+
+	SetCurrent(*glContext);
+
+	int scale_factor = GetContentScaleFactor();
+
+	wxSize client_size = GetClientSize();
+	client_size = wxSize(std::max(1, client_size.GetWidth()), std::max(1, client_size.GetHeight()));
+
+	E(glViewport(0, 0, client_size.GetWidth() * scale_factor, client_size.GetHeight() * scale_factor));
+	videoOut->Render(1, 1, 0, 0, 1, 1);
+
+	SwapBuffers();
+}
+
 VideoDisplay::VideoDisplay(wxToolBar *toolbar, bool freeSize, wxComboBox *zoomBox, wxWindow *parent, agi::Context *c)
 : wxGLCanvas(parent, buildGLAttributes())
 , autohideTools(OPT_GET("Tool/Visual/Autohide"))
@@ -100,6 +129,14 @@ VideoDisplay::VideoDisplay(wxToolBar *toolbar, bool freeSize, wxComboBox *zoomBo
 , freeSize(freeSize)
 , scale_factor(GetContentScaleFactor())
 {
+	zoomPreviewPopupWindow = new wxPopupWindow(this);
+	zoomPreviewDisplay = new MiniVideoDisplay(zoomPreviewPopupWindow);
+	zoomPreviewHideTimer.Bind(wxEVT_TIMER, std::bind(&wxPopupWindow::Show, zoomPreviewPopupWindow, false));
+#ifdef __WXGTK__
+	// this causes GDK to use a subsurface window on Wayland, which is less broken (repositioning works)
+	// gtk_window_set_type_hint(GTK_WINDOW(zoomPreviewPopupWindow->GetHandle()), GDK_WINDOW_TYPE_HINT_TOOLTIP);
+#endif
+
 	zoomBox->SetValue(fmt_wx("%g%%", windowZoomValue * 100.));
 	zoomBox->Bind(wxEVT_COMBOBOX, &VideoDisplay::SetWindowZoomFromBox, this);
 	zoomBox->Bind(wxEVT_TEXT_ENTER, &VideoDisplay::SetWindowZoomFromBoxText, this);
@@ -225,6 +262,9 @@ void VideoDisplay::Render() try {
 			err.GetMessage()));
 		return;
 	}
+
+	zoomPreviewDisplay->videoOut = videoOut.get();
+	zoomPreviewDisplay->glContext = glContext.get();
 
 	if (!content_height || !content_width)
 		PositionVideo();
@@ -438,6 +478,7 @@ void VideoDisplay::OnSizeEvent(wxSizeEvent &event) {
 	bool preserveContentSize = freeSize && IsContentZoomActive();
 	if (freeSize) UpdateViewportSize(false);
 	PositionVideo(preserveContentSize);
+	zoomPreviewPopupWindow->Position(ClientToScreen(wxPoint(0, 0)), viewportSize);
 	event.Skip();
 }
 
@@ -459,6 +500,18 @@ void VideoDisplay::OnMouseLeave(wxMouseEvent& event) {
 	mouse_pos = Vector2D();
 	if (tool)
 		tool->OnMouseEvent(event);
+}
+
+void VideoDisplay::ShowZoomPreview(bool autoHide) {
+	zoomPreviewHideTimer.Stop();
+	zoomPreviewPopupWindow->Show();
+	// keep the preview displayed for debugging
+	// if (autoHide)
+	// 	HideZoomPreview();
+}
+
+void VideoDisplay::HideZoomPreview() {
+	zoomPreviewHideTimer.StartOnce(300);
 }
 
 void VideoDisplay::OnMouseWheel(wxMouseEvent& event) {
@@ -492,6 +545,7 @@ void VideoDisplay::OnMouseWheel(wxMouseEvent& event) {
 						double newZoomValue = contentZoomValue * (1 + dir * 0.125 * wheel / event.GetWheelDelta());
 						wxPoint scaled_position = event.GetPosition() * scale_factor;
 						ZoomAndPan(newZoomValue, GetZoomAnchorPoint(scaled_position), scaled_position);
+						ShowZoomPreview(true);
 					}
 					break;
 
@@ -504,6 +558,7 @@ void VideoDisplay::OnMouseWheel(wxMouseEvent& event) {
 						Vector2D pan = event.GetWheelAxis() == wxMOUSE_WHEEL_HORIZONTAL ? Vector2D(-distance, 0) : Vector2D(0, distance);
 
 						Pan(swap ? Vector2D(pan.Y(), pan.X()) : pan);
+						ShowZoomPreview(true);
 					}
 					break;
 
@@ -531,8 +586,10 @@ void VideoDisplay::OnGestureZoom(wxZoomGestureEvent& event) {
 		isZoomGestureActive = true;
 		contentZoomAtGestureStart = contentZoomValue;
 		zoomGestureAnchorPoint = GetZoomAnchorPoint(scaled_position);
+		ShowZoomPreview();
 	} else if (event.IsGestureEnd()) {
 		isZoomGestureActive = false;
+		HideZoomPreview();
 	}
 	ZoomAndPan(contentZoomAtGestureStart * event.GetZoomFactor(), zoomGestureAnchorPoint, scaled_position);
 }

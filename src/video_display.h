@@ -41,6 +41,8 @@
 #include <typeinfo>
 #include <vector>
 #include <wx/glcanvas.h>
+#include <wx/popupwin.h>
+#include <wx/timer.h>
 
 // Prototypes
 class VideoController;
@@ -56,6 +58,16 @@ namespace agi {
 	struct Context;
 	class OptionValue;
 }
+
+class MiniVideoDisplay final : public wxGLCanvas {
+public:
+	/// The OpenGL context for this display
+	wxGLContext *glContext = nullptr;
+	/// The video renderer
+	VideoOutGL *videoOut = nullptr;
+	void Render();
+	MiniVideoDisplay(wxWindow *parent);
+};
 
 class VideoDisplay final : public wxGLCanvas {
 	/// Signals the display is connected to
@@ -129,6 +141,10 @@ class VideoDisplay final : public wxGLCanvas {
 
 	/// Frame which will replace the currently visible frame on the next render
 	std::shared_ptr<VideoFrame> pending_frame;
+
+	wxPopupWindow *zoomPreviewPopupWindow;
+	MiniVideoDisplay *zoomPreviewDisplay;
+	wxTimer zoomPreviewHideTimer;
 
 	int scale_factor;
 
@@ -206,6 +222,9 @@ class VideoDisplay final : public wxGLCanvas {
 	/// @param anchorPoint An anchor point obtained from @ref GetZoomAnchorPoint()
 	/// @param newPosition New client position of the anchor point in logical pixels
 	void ZoomAndPan(double newZoomValue, Vector2D anchorPoint, wxPoint newPosition);
+
+	void ShowZoomPreview(bool autoHide = false);
+	void HideZoomPreview();
 
 public:
 	/// @brief Constructor
