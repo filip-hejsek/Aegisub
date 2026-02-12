@@ -81,13 +81,35 @@ DialogDetachedVideo::DialogDetachedVideo(agi::Context *context)
 
 	persist = std::make_unique<PersistLocation>(this, "Video/Detached");
 
+	wxSize size = GetSize();
+
 	int display_index = wxDisplay::GetFromWindow(this);
-	// Ensure that the dialog is no larger than the screen
+	// Ensure that the dialog is no larger than the screen (this is likely broken on Wayland)
 	if (display_index != wxNOT_FOUND) {
-		wxRect bounds_rect = GetRect();
 		wxRect disp_rect = wxDisplay(display_index).GetClientArea();
-		SetSize(std::min(bounds_rect.width, disp_rect.width), std::min(bounds_rect.height, disp_rect.height));
+		size.SetWidth(std::min(size.GetWidth(), disp_rect.width));
+		size.SetHeight(std::min(size.GetHeight(), disp_rect.height));
 	}
+
+#ifdef __WXGTK3__
+	// HACK to work around wxGTK's hack:
+	//
+	// When SetSizerAndFit() is called before the window is shown, the computed
+	// fitting size may be wrong because GTK style cache hasn't been updated yet. To
+	// work araund this, wxGTK recomputes the size when the window becomes visible.
+	// This is done by setting an internal flag when SetSizerAndFit() is called and
+	// checking for this flag when the window is shown.
+	//
+	// This is a problem for us, because we only set the minimum size temporarily to
+	// determine initial size but then unset it to let the user shrink the window.
+	// So we need to reset the internal flag, which happens when a size is set
+	// explicitly. The flag is only reset when the size actually changes though, so we
+	// need to first set another size before setting the actual size again.
+	SetSize(0, 0);
+#endif // __WXGTK3__
+
+	// Set the correct size now
+	SetSize(size);
 
 	OPT_SET("Video/Detached/Enabled")->SetBool(true);
 
