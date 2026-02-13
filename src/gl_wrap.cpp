@@ -23,39 +23,8 @@
 
 #include <wx/colour.h>
 
-#ifdef HAVE_OPENGL_GL_H
-#include <OpenGL/gl.h>
-#include <OpenGL/glext.h>
-#else
-#include <GL/gl.h>
-#ifdef HAVE_GL_GLEXT_H
-#include <GL/glext.h>
-#else
-#include "gl/glext.h"
-#endif
-#endif
-
 static const float deg2rad = 3.1415926536f / 180.f;
 static const float pi = 3.1415926535897932384626433832795f;
-
-#ifdef __WIN32__
-#define glGetProc(a) wglGetProcAddress(a)
-#elif !defined(__APPLE__)
-#include <GL/glx.h>
-#define glGetProc(a) glXGetProcAddress((const GLubyte *)(a))
-#endif
-
-#if defined(__APPLE__)
-// Not required on OS X.
-#define APIENTRY
-#define GL_EXT(type, name)
-#else
-#define GL_EXT(type, name) \
-	static type name = reinterpret_cast<type>(glGetProc(#name)); \
-	if (!name) { \
-	name = reinterpret_cast<type>(& name ## Fallback); \
-	}
-#endif
 
 class VertexArray {
 	std::vector<float> data;
@@ -330,19 +299,21 @@ void OpenGLWrapper::DrawLineStrip(size_t dim, std::vector<float> const& lines) {
 	glDisableClientState(GL_VERTEX_ARRAY);
 }
 
-// Substitute for glMultiDrawArrays for sub-1.4 OpenGL
-// Not required on OS X.
-#ifndef __APPLE__
-static void APIENTRY glMultiDrawArraysFallback(GLenum mode, const GLint *first, const GLsizei *count, GLsizei primcount) {
-	for (int i = 0; i < primcount; ++i) {
-		glDrawArrays(mode, *first++, *count++);
+namespace {
+void MultiDrawArrays(GLenum mode, const GLint *first, const GLsizei *count, GLsizei primcount) {
+	if (GLEW_VERSION_1_4 || GLEW_EXT_multi_draw_arrays) {
+		glMultiDrawArrays(mode, first, count, primcount);
+	} else {
+		// fallback for sub-1.4 OpenGL
+		// not really needed nowadays, but keep it for now
+		for (int i = 0; i < primcount; ++i) {
+			glDrawArrays(mode, first[i], count[i]);
+		}
 	}
 }
-#endif
+}
 
 void OpenGLWrapper::DrawMultiPolygon(std::vector<float> const& points, std::vector<int> &start, std::vector<int> &count, Vector2D video_pos, Vector2D video_size, bool invert) {
-	GL_EXT(PFNGLMULTIDRAWARRAYSPROC, glMultiDrawArrays);
-
 	float real_line_a = line_a;
 	line_a = 0;
 
@@ -367,12 +338,12 @@ void OpenGLWrapper::DrawMultiPolygon(std::vector<float> const& points, std::vect
 	glCullFace(GL_BACK);
 	glEnableClientState(GL_VERTEX_ARRAY);
 	glVertexPointer(2, GL_FLOAT, 0, &points[0]);
-	glMultiDrawArrays(GL_TRIANGLE_FAN, &start[0], &count[0], start.size());
+	MultiDrawArrays(GL_TRIANGLE_FAN, &start[0], &count[0], start.size());
 
 	// Decrement the winding number for each backfacing triangle
 	glStencilOp(GL_DECR, GL_DECR, GL_DECR);
 	glCullFace(GL_FRONT);
-	glMultiDrawArrays(GL_TRIANGLE_FAN, &start[0], &count[0], start.size());
+	MultiDrawArrays(GL_TRIANGLE_FAN, &start[0], &count[0], start.size());
 	glDisable(GL_CULL_FACE);
 
 	// Draw the actual rectangle
@@ -390,7 +361,7 @@ void OpenGLWrapper::DrawMultiPolygon(std::vector<float> const& points, std::vect
 	SetModeLine();
 	glEnableClientState(GL_VERTEX_ARRAY);
 	glVertexPointer(2, GL_FLOAT, 0, &points[0]);
-	glMultiDrawArrays(GL_LINE_LOOP, &start[0], &count[0], start.size());
+	MultiDrawArrays(GL_LINE_LOOP, &start[0], &count[0], start.size());
 
 	glDisableClientState(GL_VERTEX_ARRAY);
 }
