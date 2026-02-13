@@ -25,7 +25,6 @@
 #include <libaegisub/log.h>
 
 #include "video_out_gl.h"
-#include "utils.h"
 #include "video_frame.h"
 
 namespace {
@@ -46,244 +45,229 @@ BOOST_NOINLINE void throw_error(GLenum err, const char *msg) {
 #define CHECK_INIT_ERROR(cmd) DO_CHECK_ERROR(cmd, VideoOutInitException, #cmd)
 #define CHECK_ERROR(cmd) DO_CHECK_ERROR(cmd, VideoOutRenderException, #cmd)
 
-/// @brief Structure tracking all precomputable information about a subtexture
-struct VideoOutGL::TextureInfo {
-	GLuint textureID = 0;
-	int dataOffset = 0;
-	int sourceH = 0;
-	int sourceW = 0;
-};
-
-/// @brief Test if a texture can be created
-/// @param width The width of the texture
-/// @param height The height of the texture
-/// @param format The texture's format
-/// @return Whether the texture could be created.
-static bool TestTexture(int width, int height, GLint format) {
-	glTexImage2D(GL_PROXY_TEXTURE_2D, 0, format, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-	glGetTexLevelParameteriv(GL_PROXY_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &format);
-	while (glGetError()) { } // Silently swallow all errors as we don't care why it failed if it did
-
-	LOG_I("video/out/gl") << "VideoOutGL::TestTexture: " << width << "x" << height;
-	return format != 0;
-}
-
 VideoOutGL::VideoOutGL() { }
 
-/// @brief Runtime detection of required OpenGL capabilities
-void VideoOutGL::DetectOpenGLCapabilities() {
-	if (maxTextureSize != 0) return;
-
-	// Test for supported internalformats
-	if (TestTexture(64, 64, GL_RGBA8)) internalFormat = GL_RGBA8;
-	else if (TestTexture(64, 64, GL_RGBA)) internalFormat = GL_RGBA;
-	else throw VideoOutInitException("Could not create a 64x64 RGB texture in any format.");
-
-	// Test for the maximum supported texture size
-	glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTextureSize);
-	while (maxTextureSize > 64 && !TestTexture(maxTextureSize, maxTextureSize, internalFormat)) maxTextureSize >>= 1;
-	LOG_I("video/out/gl") << "Maximum texture size is " << maxTextureSize << "x" << maxTextureSize;
-
-	// Test for rectangular texture support
-	supportsRectangularTextures = TestTexture(maxTextureSize, maxTextureSize >> 1, internalFormat);
+VideoOutGL::~VideoOutGL() {
+	CleanupGL();
 }
 
-/// @brief If needed, create the grid of textures for displaying frames of the given format
-/// @param width The frame's width
-/// @param height The frame's height
-/// @param format The frame's format
-/// @param bpp The frame's bytes per pixel
-void VideoOutGL::InitTextures(int width, int height, GLenum format, int bpp, bool flipped) {
-	using namespace std;
+void VideoOutGL::InitShaders() {
+	const char *vertex_shader_src = R"(
+		#version 130
+		in vec2 a_position;
+		in vec2 a_texcoord;
+		out vec2 v_texcoord;
+		uniform vec2 u_viewport;
 
-	// Do nothing if the frame size and format are unchanged
-	if (width == frameWidth && height == frameHeight && format == frameFormat && flipped == frameFlipped) return;
-	frameWidth  = width;
-	frameHeight = height;
-	frameFormat = format;
-	frameFlipped = flipped;
-	LOG_I("video/out/gl") << "Video size: " << width << "x" << height;
-
-	DetectOpenGLCapabilities();
-
-	// Clean up old textures
-	if (textureIdList.size() > 0) {
-		CHECK_INIT_ERROR(glDeleteTextures(textureIdList.size(), &textureIdList[0]));
-		textureIdList.clear();
-		textureList.clear();
-	}
-
-	// Create the textures
-	int textureArea = maxTextureSize - 2;
-	textureRows  = (int)ceil(double(height) / textureArea);
-	textureCols  = (int)ceil(double(width) / textureArea);
-	textureCount = textureRows * textureCols;
-	textureIdList.resize(textureCount);
-	textureList.resize(textureCount);
-	CHECK_INIT_ERROR(glGenTextures(textureIdList.size(), &textureIdList[0]));
-	vector<pair<int, int>> textureSizes;
-	textureSizes.reserve(textureCount);
-
-	/* Unfortunately, we can't simply use one of the two standard ways to do
-	 * tiled textures to work around texture size limits in OpenGL, due to our
-	 * need to support Microsoft's OpenGL emulation for RDP/VPC/video card
-	 * drivers that don't support OpenGL (such as the ones which Windows
-	 * Update pushes for ATI cards in Windows 7). GL_CLAMP_TO_EDGE requires
-	 * OpenGL 1.2, but the emulation only supports 1.1. GL_CLAMP + borders has
-	 * correct results, but takes several seconds to render each frame. As a
-	 * result, the code below essentially manually reimplements borders, by
-	 * just not using the edge when mapping the texture onto a quad. The one
-	 * exception to this is the texture edges which are also frame edges, as
-	 * there does not appear to be a trivial way to mirror the edges, and the
-	 * nontrivial ways are more complex that is worth to avoid a single row of
-	 * slightly discolored pixels along the edges at zooms over 100%.
-	 *
-	 * Given a 64x64 maximum texture size:
-	 *     Quads touching the top of the frame are 63 pixels tall
-	 *     Quads touching the bottom of the frame are up to 63 pixels tall
-	 *     All other quads are 62 pixels tall
-	 *     Quads not on the top skip the first row of the texture
-	 *     Quads not on the bottom skip the last row of the texture
-	 *     Width behaves in the same way with respect to left/right edges
-	 */
-
-	// Set up the display list
-	CHECK_ERROR(dl = glGenLists(1));
-	CHECK_ERROR(glNewList(dl, GL_COMPILE));
-
-	CHECK_ERROR(glShadeModel(GL_FLAT));
-	CHECK_ERROR(glDisable(GL_BLEND));
-
-	// Switch to video coordinates
-	CHECK_ERROR(glMatrixMode(GL_PROJECTION));
-	if (frameFlipped) {
-		CHECK_ERROR(glOrtho(0.0f, frameWidth, 0.0f, frameHeight, -1000.0f, 1000.0f));
-	}
-	else {
-		CHECK_ERROR(glOrtho(0.0f, frameWidth, frameHeight, 0.0f, -1000.0f, 1000.0f));
-	}
-
-	CHECK_ERROR(glEnable(GL_TEXTURE_2D));
-
-	// Calculate the position information for each texture
-	int lastRow = textureRows - 1;
-	int lastCol = textureCols - 1;
-	for (int row = 0; row < textureRows; ++row) {
-		for (int col = 0; col < textureCols; ++col) {
-			TextureInfo& ti = textureList[row * textureCols + col];
-
-			// Width and height of the area read from the frame data
-			int sourceX = col * textureArea;
-			int sourceY = row * textureArea;
-			ti.sourceW  = std::min(frameWidth  - sourceX, maxTextureSize);
-			ti.sourceH  = std::min(frameHeight - sourceY, maxTextureSize);
-
-			// Used instead of GL_PACK_SKIP_ROWS/GL_PACK_SKIP_PIXELS due to
-			// performance issues with the emulation
-			ti.dataOffset = sourceY * frameWidth * bpp + sourceX * bpp;
-
-			int textureHeight = SmallestPowerOf2(ti.sourceH);
-			int textureWidth  = SmallestPowerOf2(ti.sourceW);
-			if (!supportsRectangularTextures) {
-				textureWidth = textureHeight = std::max(textureWidth, textureHeight);
-			}
-
-			// Location where this texture is placed
-			// X2/Y2 will be offscreen unless the video frame happens to
-			// exactly use all of the texture
-			float x1 = sourceX + (col != 0);
-			float y1 = sourceY + (row != 0);
-			float x2 = sourceX + textureWidth - (col != lastCol);
-			float y2 = sourceY + textureHeight - (row != lastRow);
-
-			// Portion of the texture actually used
-			float top    = row == 0 ? 0 : 1.0f / textureHeight;
-			float left   = col == 0 ? 0 : 1.0f / textureWidth;
-			float bottom = row == lastRow ? 1.0f : 1.0f - 1.0f / textureHeight;
-			float right  = col == lastCol ? 1.0f : 1.0f - 1.0f / textureWidth;
-
-			// Store the stuff needed later
-			ti.textureID = textureIdList[row * textureCols + col];
-			textureSizes.push_back(make_pair(textureWidth, textureHeight));
-
-			CHECK_ERROR(glBindTexture(GL_TEXTURE_2D, ti.textureID));
-			CHECK_ERROR(glColor4f(1.0f, 1.0f, 1.0f, 1.0f));
-
-			// Place the texture
-			glBegin(GL_QUADS);
-				glTexCoord2f(left,  top);     glVertex2f(x1, y1);
-				glTexCoord2f(right, top);     glVertex2f(x2, y1);
-				glTexCoord2f(right, bottom);  glVertex2f(x2, y2);
-				glTexCoord2f(left,  bottom);  glVertex2f(x1, y2);
-			glEnd();
-			if (GLenum err = glGetError()) throw VideoOutRenderException("GL_QUADS", err);
+		void main() {
+			vec2 ndc = (a_position / u_viewport) * 2.0 - 1.0;
+			gl_Position = vec4(ndc, 0.0, 1.0);
+			v_texcoord = a_texcoord;
 		}
-	}
-	CHECK_ERROR(glDisable(GL_TEXTURE_2D));
+	)";
 
-	glEndList();
+	const char *fragment_shader_src = R"(
+		#version 130
+		in vec2 v_texcoord;
+		out vec4 fragColor;
+		uniform sampler2D u_tex;
 
-	// Create the textures outside of the display list as there's no need to
-	// remake them on every frame
-	for (int i = 0; i < textureCount; ++i) {
-		LOG_I("video/out/gl") << "Using texture size: " << textureSizes[i].first << "x" << textureSizes[i].second;
-		CHECK_INIT_ERROR(glBindTexture(GL_TEXTURE_2D, textureIdList[i]));
-		CHECK_INIT_ERROR(glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, textureSizes[i].first, textureSizes[i].second, 0, format, GL_UNSIGNED_BYTE, nullptr));
-		CHECK_INIT_ERROR(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR));
-		CHECK_INIT_ERROR(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR));
-		CHECK_INIT_ERROR(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP));
-		CHECK_INIT_ERROR(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP));
+		void main() {
+			fragColor = texture(u_tex, v_texcoord);
+		}
+	)";
+
+	// Compile vertex shader
+	GLuint vs = glCreateShader(GL_VERTEX_SHADER);
+	CHECK_INIT_ERROR(glShaderSource(vs, 1, &vertex_shader_src, nullptr));
+	CHECK_INIT_ERROR(glCompileShader(vs));
+
+	GLint success;
+	glGetShaderiv(vs, GL_COMPILE_STATUS, &success);
+	if (!success) {
+		char info_log[512];
+		glGetShaderInfoLog(vs, 512, nullptr, info_log);
+		glDeleteShader(vs);
+		throw VideoOutInitException("Vertex shader compilation failed: " + std::string(info_log));
 	}
+
+	// Compile fragment shader
+	GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
+	CHECK_INIT_ERROR(glShaderSource(fs, 1, &fragment_shader_src, nullptr));
+	CHECK_INIT_ERROR(glCompileShader(fs));
+
+	glGetShaderiv(fs, GL_COMPILE_STATUS, &success);
+	if (!success) {
+		char info_log[512];
+		glGetShaderInfoLog(fs, 512, nullptr, info_log);
+		glDeleteShader(vs);
+		glDeleteShader(fs);
+		throw VideoOutInitException("Fragment shader compilation failed: " + std::string(info_log));
+	}
+
+	// Link program
+	shader_program = glCreateProgram();
+	CHECK_INIT_ERROR(glAttachShader(shader_program, vs));
+	CHECK_INIT_ERROR(glAttachShader(shader_program, fs));
+	CHECK_INIT_ERROR(glLinkProgram(shader_program));
+
+	glGetProgramiv(shader_program, GL_LINK_STATUS, &success);
+	if (!success) {
+		char info_log[512];
+		glGetProgramInfoLog(shader_program, 512, nullptr, info_log);
+		glDeleteShader(vs);
+		glDeleteShader(fs);
+		glDeleteProgram(shader_program);
+		throw VideoOutInitException("Shader program linking failed: " + std::string(info_log));
+	}
+
+	glDeleteShader(vs); // TODO: RAII
+	glDeleteShader(fs);
+
+	// Get uniform locations
+	u_viewport = glGetUniformLocation(shader_program, "u_viewport");
+	u_tex = glGetUniformLocation(shader_program, "u_tex");
+}
+
+void VideoOutGL::InitGL() {
+	// TODO: proper cleanup in case of error (just call CleanupGL on exception)
+	if (initialized) return;
+
+	// Create texture
+	CHECK_INIT_ERROR(glGenTextures(1, &texture));
+	CHECK_INIT_ERROR(glBindTexture(GL_TEXTURE_2D, texture));
+
+	// Set texture parameters
+	CHECK_INIT_ERROR(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR));
+	CHECK_INIT_ERROR(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR));
+	CHECK_INIT_ERROR(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE));
+	CHECK_INIT_ERROR(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE));
+
+	// Create VAO
+	CHECK_INIT_ERROR(glGenVertexArrays(1, &vao));
+	CHECK_INIT_ERROR(glBindVertexArray(vao));
+
+	// Create VBO
+	CHECK_INIT_ERROR(glGenBuffers(1, &vbo));
+	CHECK_INIT_ERROR(glBindBuffer(GL_ARRAY_BUFFER, vbo));
+
+	// Vertex format: position (x, y), texcoord (u, v)
+	CHECK_INIT_ERROR(glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0));
+	CHECK_INIT_ERROR(glEnableVertexAttribArray(0));
+
+	CHECK_INIT_ERROR(glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float))));
+	CHECK_INIT_ERROR(glEnableVertexAttribArray(1));
+
+	// Initialize shaders
+	InitShaders();
+
+	// Cleanup
+	CHECK_INIT_ERROR(glBindTexture(GL_TEXTURE_2D, 0));
+	CHECK_INIT_ERROR(glBindVertexArray(0));
+	CHECK_INIT_ERROR(glBindBuffer(GL_ARRAY_BUFFER, 0));
+
+	initialized = true;
+}
+
+void VideoOutGL::CleanupGL() {
+	if (texture) {
+		glDeleteTextures(1, &texture);
+		texture = 0;
+	}
+	if (vbo) {
+		glDeleteBuffers(1, &vbo);
+		vbo = 0;
+	}
+	if (vao) {
+		glDeleteVertexArrays(1, &vao);
+		vao = 0;
+	}
+	if (shader_program) {
+		glDeleteProgram(shader_program);
+		shader_program = 0;
+	}
+	initialized = false;
 }
 
 void VideoOutGL::UploadFrameData(VideoFrame const& frame) {
-	if (frame.height == 0 || frame.width == 0) return;
+	if (!initialized) {
+		InitGL();
+	}
 
-	InitTextures(frame.width, frame.height, GL_BGRA_EXT, 4, frame.flipped);
+	CHECK_ERROR(glBindTexture(GL_TEXTURE_2D, texture));
 
-	// Set the row length, needed to be able to upload partial rows
+	// Reallocate texture if size changed
+	if (tex_width != frame.width || tex_height != frame.height) {
+		CHECK_ERROR(glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, frame.width, frame.height,
+			0, GL_BGRA, GL_UNSIGNED_BYTE, nullptr));
+		tex_width = frame.width;
+		tex_height = frame.height;
+	}
+
+	// Upload frame data
+	// Handle pitch properly - the frame might have padding at the end of each row
 	CHECK_ERROR(glPixelStorei(GL_UNPACK_ROW_LENGTH, frame.pitch / 4));
-
-	for (auto& ti : textureList) {
-		CHECK_ERROR(glBindTexture(GL_TEXTURE_2D, ti.textureID));
-		CHECK_ERROR(glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, ti.sourceW,
-			ti.sourceH, GL_BGRA_EXT, GL_UNSIGNED_BYTE, &frame.data[ti.dataOffset]));
-	}
-
+	CHECK_ERROR(glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, frame.width, frame.height,
+		GL_BGRA, GL_UNSIGNED_BYTE, frame.data.data()));
 	CHECK_ERROR(glPixelStorei(GL_UNPACK_ROW_LENGTH, 0));
+
+	CHECK_ERROR(glBindTexture(GL_TEXTURE_2D, 0));
+
+	frameFlipped = frame.flipped;
 }
 
-void VideoOutGL::Render(int client_width, int client_height, int x, int y, int width, int height) {
-	CHECK_ERROR(glMatrixMode(GL_PROJECTION));
-	CHECK_ERROR(glLoadIdentity());
-	CHECK_ERROR(glPushMatrix());
-
-	float cw = static_cast<float>(client_width);
-	float ch = static_cast<float>(client_height);
-	// Transform (-1, -1) ~ (1, 1) rect to (-1, 1) + 2 * ( (dx1 / client_width, dx2 / client_height) ~ ((dx1 + dx2) / client_width, (dy1 + dy2) / client_height)) )) rect
-	// x = -1 goes to -1 + 2 * dx1 / cw
-	// x = +1 goes to -1 + 2 * (dx1 + dx2) / cw
-	float scale_x = width / cw;
-	float scale_y = height / ch;
-	float translate_x = -1 + (2 * x + width) / cw;
-	float translate_y = -1 + (2 * y + height) / ch;
-	float matrix[16] = {
-		scale_x, 0, 0, 0,
-		0, scale_y, 0, 0,
-		0, 0, 1, 0,
-		translate_x, translate_y, 0, 1,
-	};
-	CHECK_ERROR(glMultMatrixf(matrix));
-
-	CHECK_ERROR(glCallList(dl));
-
-	CHECK_ERROR(glPopMatrix());
-
-}
-
-VideoOutGL::~VideoOutGL() {
-	if (textureIdList.size() > 0) {
-		glDeleteTextures(textureIdList.size(), &textureIdList[0]);
-		glDeleteLists(dl, 1);
+void VideoOutGL::Render(int vp_width, int vp_height, int x, int y, int width, int height) {
+	if (!initialized || tex_width == 0 || tex_height == 0) {
+		return; // Nothing to render
 	}
+
+	// Get current viewport
+	// GLint viewport[4];
+	// glGetIntegerv(GL_VIEWPORT, viewport);
+	// int vp_width = viewport[2];
+	// int vp_height = viewport[3];
+
+	float left = x;
+	float right = x + width;
+	float bottom = y;
+	float top = y + height;
+
+	if (frameFlipped)
+		std::swap(top, bottom);
+
+	// Texture coordinates
+	float vertices[] = {
+		// Position      // TexCoord
+		left,  bottom,   0.0f, 1.0f,  // Bottom-left
+		right, bottom,   1.0f, 1.0f,  // Bottom-right
+		right, top,      1.0f, 0.0f,  // Top-right
+
+		right, top,      1.0f, 0.0f,  // Top-right
+		left,  top,      0.0f, 0.0f,  // Top-left
+		left,  bottom,   0.0f, 1.0f   // Bottom-left
+	};
+
+	// Use shader program
+	CHECK_ERROR(glUseProgram(shader_program));
+
+	// Set uniforms
+	CHECK_ERROR(glUniform2f(u_viewport, vp_width, vp_height));
+	CHECK_ERROR(glUniform1i(u_tex, 0));
+
+	// Bind texture
+	CHECK_ERROR(glActiveTexture(GL_TEXTURE0));
+	CHECK_ERROR(glBindTexture(GL_TEXTURE_2D, texture));
+
+	// Upload vertex data and draw
+	CHECK_ERROR(glBindVertexArray(vao));
+	CHECK_ERROR(glBindBuffer(GL_ARRAY_BUFFER, vbo));
+	CHECK_ERROR(glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STREAM_DRAW));
+
+	CHECK_ERROR(glDrawArrays(GL_TRIANGLES, 0, 6));
+
+	// Cleanup
+	CHECK_ERROR(glUseProgram(0));
+	CHECK_ERROR(glBindTexture(GL_TEXTURE_2D, 0));
+	CHECK_ERROR(glBindVertexArray(0));
+	CHECK_ERROR(glBindBuffer(GL_ARRAY_BUFFER, 0));
 }
