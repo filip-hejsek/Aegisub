@@ -33,9 +33,6 @@ covered by another license in the file itself.
 The following directories and file are covered by their respective licenses as
 follows:
 
-src/gl/
- - MIT license. See src/gl/glext.h
-
 src/MatroskaParser.(c|h)
  - Licensed to BSDL with permission from the author.
 

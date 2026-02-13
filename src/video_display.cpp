@@ -59,12 +59,6 @@
 #include <wx/textctrl.h>
 #include <wx/toolbar.h>
 
-#ifdef HAVE_OPENGL_GL_H
-#include <OpenGL/gl.h>
-#else
-#include <GL/gl.h>
-#endif
-
 namespace {
 
 /// Attribute list for gl canvases; set the canvases to doublebuffered rgba with an 8 bit stencil buffer
@@ -170,10 +164,19 @@ bool VideoDisplay::InitContext() {
 	if (GetClientSize() == wxSize(0, 0))
 		return false;
 
-	if (!glContext)
+	bool needInitialization = !glContext;
+	if (needInitialization)
 		glContext = std::make_unique<wxGLContext>(this);
 
 	SetCurrent(*glContext);
+
+	if (needInitialization) {
+		// glewExperimental = GL_TRUE;
+		if (glewInit() != GLEW_OK) {
+			// TODO report error
+		}
+	}
+
 	return true;
 }
 
