@@ -158,10 +158,6 @@ void VideoOutGL::InitTextures(int width, int height, GLenum format, int bpp, boo
 	CHECK_ERROR(dl = glGenLists(1));
 	CHECK_ERROR(glNewList(dl, GL_COMPILE));
 
-	CHECK_ERROR(glClearColor(0,0,0,0));
-	CHECK_ERROR(glClearStencil(0));
-	CHECK_ERROR(glClear(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT));
-
 	CHECK_ERROR(glShadeModel(GL_FLAT));
 	CHECK_ERROR(glDisable(GL_BLEND));
 
@@ -289,8 +285,6 @@ void VideoOutGL::Render(int client_width, int client_height, int x, int y, int w
 	CHECK_ERROR(glCallList(dl));
 
 	CHECK_ERROR(glPopMatrix());
-	CHECK_ERROR(glMatrixMode(GL_MODELVIEW));
-	CHECK_ERROR(glLoadIdentity());
 
 }
 
