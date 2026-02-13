@@ -107,6 +107,10 @@
 #include <boost/interprocess/streams/bufferstream.hpp>
 #include <boost/interprocess/streams/vectorstream.hpp>
 
+// GLEW must be included before anything that includes gl.h
+#include <GL/glew.h>
+#include <GL/gl.h>
+
 // wxWidgets headers
 #include <wx/defs.h> // Leave this first.
 
@@ -198,12 +202,6 @@
 #include <wx/window.h>
 #include <wx/wxcrt.h>
 #include <wx/wxcrtvararg.h>
-
-#ifdef HAVE_OPENGL_GL_H
-#include <OpenGL/gl.h>
-#else
-#include <GL/gl.h>
-#endif
 
 #ifndef _CRT_SECURE_NO_WARNINGS_DEFINED
 #undef _CRT_SECURE_NO_WARNINGS
