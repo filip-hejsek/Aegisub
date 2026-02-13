@@ -21,45 +21,27 @@
 
 #include <libaegisub/exception.h>
 
-#include <vector>
-
 struct VideoFrame;
 
 /// @class VideoOutGL
 /// @brief OpenGL based video renderer
 class VideoOutGL {
-	struct TextureInfo;
+private:
+	GLuint texture = 0;
+	GLuint vao = 0;
+	GLuint vbo = 0;
+	GLuint shader_program = 0;
+	GLint u_viewport = -1;
+	GLint u_tex = -1;
 
-	/// The maximum texture size supported by the user's graphics card
-	int maxTextureSize = 0;
-	/// Whether rectangular textures are supported by the user's graphics card
-	bool supportsRectangularTextures = false;
-	/// The internalformat to use
-	int internalFormat = 0;
-
-	/// The frame height which the texture grid has been set up for
-	int frameWidth = 0;
-	/// The frame width which the texture grid has been set up for
-	int frameHeight = 0;
-	/// The frame format which the texture grid has been set up for
-	GLenum frameFormat = 0;
-	/// Whether the grid is set up for flipped video
+	int tex_width = 0;
+	int tex_height = 0;
+	bool initialized = false;
 	bool frameFlipped = false;
-	/// List of OpenGL texture ids used in the grid
-	std::vector<GLuint> textureIdList;
-	/// List of precalculated texture display information
-	std::vector<TextureInfo> textureList;
-	/// OpenGL display list which draws the frames
-	GLuint dl = 0;
-	/// The total texture count
-	int textureCount = 0;
-	/// The number of rows of textures
-	int textureRows = 0;
-	/// The number of columns of textures
-	int textureCols = 0;
 
-	void DetectOpenGLCapabilities();
-	void InitTextures(int width, int height, GLenum format, int bpp, bool flipped);
+	void InitGL();
+	void InitShaders();
+	void CleanupGL();
 
 	VideoOutGL(const VideoOutGL &) = delete;
 	VideoOutGL& operator=(const VideoOutGL&) = delete;
@@ -75,6 +57,7 @@ public:
 	/// @param y Bottom left y coordinate of the target area
 	/// @param width Width in pixels of the target area
 	/// @param height Height in pixels of the target area
+	/// Assumes origin at bottom-left with Y increasing upward
 	void Render(int client_width, int client_height, int x, int y, int width, int height);
 
 	VideoOutGL();
@@ -98,5 +81,5 @@ public:
 	VideoOutInitException(const char *func, int err)
 	: VideoOutException(std::string(func) + " failed with error code " + std::to_string(err))
 	{ }
-	VideoOutInitException(const char *err) : VideoOutException(err) { }
+	VideoOutInitException(std::string&& msg) : VideoOutException(std::move(msg)) { }
 };
