@@ -218,6 +218,16 @@ void VideoDisplay::Render() try {
 	wxSize client_size = GetClientSize();
 	client_size = wxSize(std::max(1, client_size.GetWidth()), std::max(1, client_size.GetHeight()));
 
+	E(glClearColor(0,0,0,0));
+	E(glClearStencil(0));
+	E(glClear(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT));
+
+	E(glShadeModel(GL_FLAT));
+	E(glDisable(GL_BLEND));
+
+	E(glMatrixMode(GL_MODELVIEW));
+	E(glLoadIdentity());
+
 	E(glViewport(0, 0, client_size.GetWidth() * scale_factor, client_size.GetHeight() * scale_factor));
 	videoOut->Render(client_size.GetWidth() * scale_factor, client_size.GetHeight() * scale_factor,
 		content_left, content_bottom, content_width, content_height);
