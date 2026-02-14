@@ -134,7 +134,7 @@ VideoDisplay::VideoDisplay(wxToolBar *toolbar, bool freeSize, wxComboBox *zoomBo
 	zoomPreviewHideTimer.Bind(wxEVT_TIMER, std::bind(&wxPopupWindow::Show, zoomPreviewPopupWindow, false));
 #ifdef __WXGTK__
 	// this causes GDK to use a subsurface window on Wayland, which is less broken (repositioning works)
-	// gtk_window_set_type_hint(GTK_WINDOW(zoomPreviewPopupWindow->GetHandle()), GDK_WINDOW_TYPE_HINT_TOOLTIP);
+	gtk_window_set_type_hint(GTK_WINDOW(zoomPreviewPopupWindow->GetHandle()), GDK_WINDOW_TYPE_HINT_TOOLTIP);
 #endif
 
 	zoomBox->SetValue(fmt_wx("%g%%", windowZoomValue * 100.));
@@ -276,16 +276,17 @@ void VideoDisplay::Render() try {
 	E(glClearStencil(0));
 	E(glClear(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT));
 
-	E(glShadeModel(GL_FLAT));
+	// E(glShadeModel(GL_FLAT));
 	E(glDisable(GL_BLEND));
 
-	E(glMatrixMode(GL_MODELVIEW));
-	E(glLoadIdentity());
+	// E(glMatrixMode(GL_MODELVIEW));
+	// E(glLoadIdentity());
 
 	E(glViewport(0, 0, client_size.GetWidth() * scale_factor, client_size.GetHeight() * scale_factor));
 	videoOut->Render(client_size.GetWidth() * scale_factor, client_size.GetHeight() * scale_factor,
 		content_left, content_bottom, content_width, content_height);
 
+#if 0
 	E(glMatrixMode(GL_PROJECTION));
 	E(glLoadIdentity());
 	E(glOrtho(0.0f, client_size.GetWidth(), client_size.GetHeight(), 0.0f, -1000.0f, 1000.0f));
@@ -308,6 +309,7 @@ void VideoDisplay::Render() try {
 
 	if ((mouse_pos || !autohideTools->GetBool()) && tool)
 		tool->Draw();
+#endif
 
 	SwapBuffers();
 }
