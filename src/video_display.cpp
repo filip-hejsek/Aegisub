@@ -421,10 +421,11 @@ void VideoDisplay::FitClientSizeToVideo() {
 	PositionVideo();
 }
 
-void VideoDisplay::OnSizeEvent(wxSizeEvent &) {
+void VideoDisplay::OnSizeEvent(wxSizeEvent &event) {
 	bool preserveContentSize = freeSize && IsContentZoomActive();
 	if (freeSize) UpdateViewportSize(false);
 	PositionVideo(preserveContentSize);
+	event.Skip();
 }
 
 void VideoDisplay::OnMouseEvent(wxMouseEvent& event) {
