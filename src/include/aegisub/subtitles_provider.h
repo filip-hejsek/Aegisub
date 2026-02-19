@@ -39,16 +39,19 @@
 #include <vector>
 
 class AssFile;
+class AssStyle;
 struct VideoFrame;
 
 class SubtitlesProvider {
 	std::vector<char> buffer;
 	virtual void LoadSubtitles(const char *data, size_t len)=0;
+	virtual bool CalculateTextExtents(std::string_view data, int resX, int resY, double &width, double &height, double &descent, double &extlead)=0;
 
 public:
 	virtual ~SubtitlesProvider() = default;
 	void LoadSubtitles(AssFile *subs, int time = -1);
 	virtual void DrawSubtitles(VideoFrame &dst, double time)=0;
+	bool CalculateTextExtents(AssStyle *style, std::string const& text, double &width, double &height, double &descent, double &extlead);
 	virtual void Reinitialize() { }
 };
 

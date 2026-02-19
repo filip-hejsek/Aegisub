@@ -54,6 +54,7 @@
 
 extern "C" {
 #include <ass/ass.h>
+#include <ass/ass_metrics.h>
 }
 
 namespace {
@@ -123,6 +124,8 @@ public:
 		ass_track = ass_read_memory(library, const_cast<char *>(data), len, nullptr);
 		if (!ass_track) throw agi::InternalError("libass failed to load subtitles.");
 	}
+
+	bool CalculateTextExtents(std::string_view data, int resX, int resY, double &width, double &height, double &descent, double &extlead) override;
 
 	void DrawSubtitles(VideoFrame &dst, double time) override;
 
@@ -200,6 +203,25 @@ void LibassSubtitlesProvider::DrawSubtitles(VideoFrame &frame,double time) {
 			return ret;
 		});
 	}
+}
+
+bool LibassSubtitlesProvider::CalculateTextExtents(std::string_view data, int resX, int resY, double &width, double &height, double &descent, double &extlead) {
+	std::unique_ptr<ASS_Track, decltype(&ass_free_track)> tmp_track = {ass_read_memory(library, const_cast<char *>(data.data()), data.length(), nullptr), ass_free_track};
+	if (!tmp_track) throw agi::InternalError("libass failed to load subtitles.");
+	ass_set_frame_size(renderer(), resX, resY);
+	ass_set_storage_size(renderer(), resX, resY);
+	ASS_Metrics *metrics = ass_get_metrics(renderer(), tmp_track.get(), 0);
+	if (!metrics) throw agi::InternalError("libass didn't return any metrics");
+	ASS_RunMetrics *run = metrics->runs;
+	if (run) {
+		width = run->advance.x;
+		height = run->asc + run->advance.y + run->desc; // Is adding advance.y correct?
+		descent = run->desc;
+		extlead = run->pos.y - run->advance.y; // I have no idea what I'm doing with this one
+	} else {
+		width = height = descent = extlead = 0;
+	}
+	return true;
 }
 }
 
