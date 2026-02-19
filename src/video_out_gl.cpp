@@ -193,6 +193,7 @@ void VideoOutGL::UploadFrameData(VideoFrame const& frame) {
 	if (!initialized) {
 		InitGL();
 	}
+	// Pixel Buffer Objects?
 
 	CHECK_ERROR(glBindTexture(GL_TEXTURE_2D, texture));
 
