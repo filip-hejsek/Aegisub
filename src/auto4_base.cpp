@@ -35,10 +35,12 @@
 #include "dialog_progress.h"
 #include "format.h"
 #include "include/aegisub/context.h"
+#include "include/aegisub/subtitles_provider.h"
 #include "options.h"
 #include "string_codec.h"
 #include "subs_controller.h"
 
+#include <libaegisub/background_runner.h>
 #include <libaegisub/dispatch.h>
 #include <libaegisub/fs.h>
 #include <libaegisub/path.h>
@@ -48,6 +50,7 @@
 #include <boost/algorithm/string/replace.hpp>
 #include <future>
 
+#include <mutex>
 #include <wx/dcmemory.h>
 #include <wx/log.h>
 #include <wx/sizer.h>
@@ -59,112 +62,36 @@
 #include <libaegisub/charset_conv_win.h>
 #endif
 
+namespace {
+class DummyProgressSink : public agi::ProgressSink {
+	void SetIndeterminate() {}
+	void SetTitle(std::string const &) {}
+	void SetMessage(std::string const &) {}
+	void SetProgress(int64_t, int64_t) {}
+	void Log(std::string const &) {}
+	bool IsCancelled() { return false; }
+};
+const DummyProgressSink dummy_sink;
+class DummyBackgroundRunner : public agi::BackgroundRunner {
+	void Run(std::function<void(agi::ProgressSink *)> task) override {
+		task(const_cast<DummyProgressSink *>(&dummy_sink));
+	}
+};
+const DummyBackgroundRunner dummy_background_runner;
+std::mutex provider_mutex;
+std::unique_ptr<SubtitlesProvider> subtitles_provider;
+}
+
 namespace Automation4 {
 	bool CalculateTextExtents(AssStyle *style, std::string const& text, double &width, double &height, double &descent, double &extlead)
 	{
 		width = height = descent = extlead = 0;
 
-		double fontsize = style->fontsize * 64;
-		double spacing = style->spacing * 64;
+		std::lock_guard<std::mutex> guard(provider_mutex);
+		if (!subtitles_provider)
+			subtitles_provider = SubtitlesProviderFactory::GetProvider(const_cast<DummyBackgroundRunner *>(&dummy_background_runner));
 
-#ifdef WIN32
-		// This is almost copypasta from TextSub
-		auto dc = CreateCompatibleDC(nullptr);
-		if (!dc) return false;
-
-		SetMapMode(dc, MM_TEXT);
-
-		LOGFONTW lf = {0};
-		lf.lfHeight = (LONG)fontsize;
-		lf.lfWeight = style->bold ? FW_BOLD : FW_NORMAL;
-		lf.lfItalic = style->italic;
-		lf.lfUnderline = style->underline;
-		lf.lfStrikeOut = style->strikeout;
-		lf.lfCharSet = style->encoding;
-		lf.lfOutPrecision = OUT_TT_PRECIS;
-		lf.lfClipPrecision = CLIP_DEFAULT_PRECIS;
-		lf.lfQuality = ANTIALIASED_QUALITY;
-		lf.lfPitchAndFamily = DEFAULT_PITCH|FF_DONTCARE;
-		wcsncpy(lf.lfFaceName, agi::charset::ConvertW(style->font).c_str(), 31);
-
-		auto font = CreateFontIndirect(&lf);
-		if (!font) return false;
-
-		auto old_font = SelectObject(dc, font);
-
-		std::wstring wtext(agi::charset::ConvertW(text));
-		if (spacing != 0 ) {
-			width = 0;
-			for (auto c : wtext) {
-				SIZE sz;
-				GetTextExtentPoint32(dc, &c, 1, &sz);
-				width += sz.cx + spacing;
-				height = sz.cy;
-			}
-		}
-		else {
-			SIZE sz;
-			GetTextExtentPoint32(dc, &wtext[0], (int)wtext.size(), &sz);
-			width = sz.cx;
-			height = sz.cy;
-		}
-
-		TEXTMETRIC tm;
-		GetTextMetrics(dc, &tm);
-		descent = tm.tmDescent;
-		extlead = tm.tmExternalLeading;
-
-		SelectObject(dc, old_font);
-		DeleteObject(font);
-		DeleteObject(dc);
-
-#else // not WIN32
-		wxMemoryDC thedc;
-
-		// fix fontsize to be 72 DPI
-		//fontsize = -FT_MulDiv((int)(fontsize+0.5), 72, thedc.GetPPI().y);
-
-		// now try to get a font!
-		// use the font list to get some caching... (chance is the script will need the same font very often)
-		// USING wxTheFontList SEEMS TO CAUSE BAD LEAKS!
-		//wxFont *thefont = wxTheFontList->FindOrCreateFont(
-		wxFont thefont(
-			(int)fontsize,
-			wxFONTFAMILY_DEFAULT,
-			style->italic ? wxFONTSTYLE_ITALIC : wxFONTSTYLE_NORMAL,
-			style->bold ? wxFONTWEIGHT_BOLD : wxFONTWEIGHT_NORMAL,
-			style->underline,
-			to_wx(style->font),
-			wxFONTENCODING_SYSTEM); // FIXME! make sure to get the right encoding here, make some translation table between windows and wx encodings
-		thedc.SetFont(thefont);
-
-		wxString wtext(to_wx(text));
-		if (spacing) {
-			// If there's inter-character spacing, kerning info must not be used, so calculate width per character
-			// NOTE: Is kerning actually done either way?!
-			for (auto const& wc : wtext) {
-				int a, b, c, d;
-				thedc.GetTextExtent(wc, &a, &b, &c, &d);
-				double scaling = fontsize / (double)(b > 0 ? b : 1); // semi-workaround for missing OS/2 table data for scaling
-				width += (a + spacing)*scaling;
-				height = b > height ? b*scaling : height;
-				descent = c > descent ? c*scaling : descent;
-				extlead = d > extlead ? d*scaling : extlead;
-			}
-		} else {
-			// If the inter-character spacing should be zero, kerning info can (and must) be used, so calculate everything in one go
-			wxCoord lwidth, lheight, ldescent, lextlead;
-			thedc.GetTextExtent(wtext, &lwidth, &lheight, &ldescent, &lextlead);
-			double scaling = fontsize / (double)(lheight > 0 ? lheight : 1); // semi-workaround for missing OS/2 table data for scaling
-			width = lwidth*scaling; height = lheight*scaling; descent = ldescent*scaling; extlead = lextlead*scaling;
-		}
-#endif
-
-		// Compensate for scaling
-		width = style->scalex / 100 * width / 64;
-		height = style->scaley / 100 * height / 64;
-		descent = style->scaley / 100 * descent / 64;
-		extlead = style->scaley / 100 * extlead / 64;
+		subtitles_provider->CalculateTextExtents(style, text, width, height, descent, extlead);
 
 		return true;
 	}
