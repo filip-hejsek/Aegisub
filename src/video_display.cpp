@@ -396,6 +396,8 @@ void VideoDisplay::FitClientSizeToVideo() {
 		wxSize oldSize = top->GetSize();
 		top->SetSize(top->GetSize() + newViewportSize / scale_factor - cs);
 		SetClientSize(cs + top->GetSize() - oldSize);
+		// NOTE: When the window is maximized, the size cannot be changed, and this functionallity appears broken.
+		//       Consider unmaximizing the window.
 	}
 	else {
 		SetMinClientSize(newViewportSize / scale_factor);
