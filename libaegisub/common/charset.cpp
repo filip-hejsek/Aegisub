@@ -48,9 +48,11 @@ std::string Detect(agi::fs::path const& file) {
 		return "binary";
 
 	uint64_t binaryish = 0;
+	uint64_t utf8_errors = 0;
 
 #ifdef WITH_UCHARDET
 	agi::scoped_holder<uchardet_t> ud(uchardet_new(), uchardet_delete);
+	int utf8_cont_bytes = 0;
 	for (uint64_t offset = 0; offset < fp.size(); ) {
 		auto read = std::min<uint64_t>(4096, fp.size() - offset);
 		auto buf = fp.read(offset, read);
@@ -58,15 +60,47 @@ std::string Detect(agi::fs::path const& file) {
 
 		offset += read;
 
-		// A dumb heuristic to detect binary files
 		for (size_t i = 0; i < read; ++i) {
+			// A dumb heuristic to detect binary files
 			if ((unsigned char)buf[i] < 32 && (buf[i] != '\r' && buf[i] != '\n' && buf[i] != '\t'))
 				++binaryish;
+
+			// Detect utf8 errors
+			// We don't check for:
+			//  - overlong encodings
+			//  - invalid Unicode ranges
+			int l_ones = std::countl_one((unsigned char)buf[i]);
+			if (utf8_cont_bytes && l_ones == 1) {
+				// valid continuation byte
+				--utf8_cont_bytes;
+			} else {
+				if (utf8_cont_bytes) {
+					// missing continuation bytes
+					utf8_cont_bytes = 0;
+					++utf8_errors;
+				}
+				if (l_ones > 4) {
+					// invalid byte
+					++utf8_errors;
+				} else if (l_ones > 1) {
+					// start of multibyte sequence
+					utf8_cont_bytes = l_ones - 1;
+				} else if (l_ones == 1) {
+					// invalid continuation byte
+					++utf8_errors;
+				}
+			}
 		}
 
 		if (binaryish > offset / 8)
 			return "binary";
 	}
+	if (utf8_cont_bytes) {
+		// missing continuation bytes
+		++utf8_errors;
+	}
+	if (utf8_errors < 5)
+		return "utf-8";
 	uchardet_data_end(ud);
 	return uchardet_get_charset(ud);
 #else
