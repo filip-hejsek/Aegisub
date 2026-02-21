@@ -387,7 +387,7 @@ void VideoDisplay::PositionVideo(bool preserveContentSize) {
 		                     content_width / scale_factor, content_height / scale_factor);
 	}
 
-	Render();
+	Refresh(false);
 }
 
 void VideoDisplay::FitClientSizeToVideo() {
