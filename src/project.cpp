@@ -117,7 +117,7 @@ bool Project::DoLoadSubtitles(agi::fs::path const& path, std::string encoding, P
 		// distinguish them based on filename alone, and just ignore failures
 		// rather than trying to differentiate between malformed timecodes
 		// files and things that aren't timecodes files at all
-		try { DoLoadTimecodes(path); return false; } catch (...) { }
+		try { DoLoadTimecodes(path); return false; } catch (...) { } // FIXME should catch concrete exceptions
 		try { DoLoadKeyframes(path); return false; } catch (...) { }
 	}
 
