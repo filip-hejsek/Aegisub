@@ -117,7 +117,18 @@ VideoDisplay::VideoDisplay(wxToolBar *toolbar, bool freeSize, wxComboBox *zoomBo
 		LOG_E("video/display") << "Failed to enable touch events.";
 	}
 
-	Bind(wxEVT_PAINT, std::bind(&VideoDisplay::Render, this));
+	Bind(wxEVT_PAINT, [this](auto &) {
+		// According to ChatGPT (TODO verify):
+		// wxPaintDC is required (on Windows).
+		// Even though we don’t use it directly, we must create it in OnPaint().
+		wxPaintDC dc(this);
+		Render();
+		// Consider doing all rendering in the paint hadler and never calling Render() outside of it.
+		// Update() can be used to force processing pending paint events if necessary.
+	});
+	// Consider using:
+	// SetBackgroundStyle(wxBG_STYLE_PAINT);
+
 	Bind(wxEVT_SIZE, &VideoDisplay::OnSizeEvent, this);
 	Bind(wxEVT_CONTEXT_MENU, &VideoDisplay::OnContextMenu, this);
 	Bind(wxEVT_ENTER_WINDOW, &VideoDisplay::OnMouseEvent, this);
