@@ -93,6 +93,8 @@ SubsTextEditCtrl::SubsTextEditCtrl(wxWindow* parent, wxSize wsize, long style, a
 	UsePopUp(wxSTC_POPUP_NEVER);
 	SetStyles();
 
+	SetIMEInteraction(wxSTC_IME_INLINE);
+
 	// Set hotkeys
 	CmdKeyClear(wxSTC_KEY_RETURN,wxSTC_KEYMOD_CTRL);
 	CmdKeyClear(wxSTC_KEY_RETURN,wxSTC_KEYMOD_SHIFT);
