@@ -83,6 +83,9 @@ if get_option('enable_update_checker')
     conf.set_quoted('UPDATE_CHECKER_SERVER', get_option('update_server'))
     conf.set_quoted('UPDATE_CHECKER_BASE_URL', get_option('update_url'))
 endif
+if get_option('e2e_test')
+    conf.set('AEGI_E2E_TEST', 1)
+endif
 
 deps = []
 
