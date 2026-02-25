@@ -165,7 +165,11 @@ void DialogProgress::Run(std::function<void(agi::ProgressSink*)> task) {
 			// so the user can read the debug output and switch the cancel button to a
 			// close button
 			bool cancelled = this->ps->IsCancelled();
-			if (cancelled || (log_output->IsEmpty() && !pending_log))
+			bool close_dialog = cancelled || (log_output->IsEmpty() && !pending_log);
+#ifdef AEGI_E2E_TEST
+			close_dialog = true; // Always close the dialog in tests
+#endif
+			if (close_dialog)
 				EndModal(!cancelled);
 			else {
 				if (!pending_log.empty()) {
