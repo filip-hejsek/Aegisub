@@ -1178,6 +1178,7 @@ void PortalPickColorCallback(GObject *source, GAsyncResult *res, gpointer data) 
 	g_variant_get(color_result.get(), "(ddd)", &r, &g, &b);
 	agi::Color color(float_to_byte(r), float_to_byte(g), float_to_byte(b), 0);
 	// FIXME what if event_target has been destroyed in the meantime? (unlikely, but cannot be completely ruled out)
+	// TODO: use some kind of wx weak pointer (wxWeakRef)
 	event_target->QueueEvent(new ValueEvent<agi::Color>(EVT_OS_SELECT, 0, color));
 }
 }
